@@ -22,14 +22,16 @@ const PIPE_GAP = 150;
 const PIPE_SPEED = 2.5;
 const PIPE_SPAWN_INTERVAL = 1500; // ms
 const GROUND_HEIGHT = 80;
+const FIXED_STEP = 1000 / 60; // physics always advances in 16.67ms chunks
 
 let bestScore = Number(localStorage.getItem('flappyBestScore')) || 0;
 
 let state = 'start'; // 'start' | 'playing' | 'gameover'
 let animationId = null;
-let lastPipeTime = 0;
 let lastFrameTime = 0;
 let groundOffset = 0;
+let accumulator = 0;
+let pipeTimer = 0;
 
 let bird = createBird();
 let pipes = [];
@@ -63,7 +65,7 @@ function resetGame() {
   bird = createBird();
   pipes = [];
   score = 0;
-  lastPipeTime = 0;
+  pipeTimer = 0;
   groundOffset = 0;
   scoreDisplay.textContent = '0';
 }
@@ -99,7 +101,7 @@ function startGame() {
   hud.classList.remove('hidden');
   bird.velocity = FLAP_STRENGTH;
   lastFrameTime = performance.now();
-  lastPipeTime = performance.now();
+  accumulator = 0;
   if (!animationId) {
     animationId = requestAnimationFrame(loop);
   }
@@ -117,7 +119,10 @@ function endGame() {
   gameOverScreen.classList.remove('hidden');
 }
 
-function update(dt) {
+function update() {
+  // Called with a fixed step (see loop()) so physics is identical on every
+  // monitor regardless of refresh rate.
+
   // Bird physics
   bird.velocity += GRAVITY;
   bird.y += bird.velocity;
@@ -136,10 +141,10 @@ function update(dt) {
   }
 
   // Pipes
-  const now = performance.now();
-  if (now - lastPipeTime > PIPE_SPAWN_INTERVAL) {
+  pipeTimer += FIXED_STEP;
+  if (pipeTimer > PIPE_SPAWN_INTERVAL) {
     spawnPipe();
-    lastPipeTime = now;
+    pipeTimer = 0;
   }
 
   for (let i = pipes.length - 1; i >= 0; i--) {
@@ -303,11 +308,18 @@ function render() {
 }
 
 function loop(timestamp) {
-  const dt = timestamp - lastFrameTime;
-  lastFrameTime = timestamp;
+  const frameTime = Math.min(timestamp - lastFrameTime, 250); // clamp so a
+  lastFrameTime = timestamp;                                  // background tab doesn't cause a huge catch-up burst
 
   if (state === 'playing') {
-    update(dt);
+    accumulator += frameTime;
+    // Run physics in fixed FIXED_STEP chunks. A 144Hz monitor calls loop()
+    // more often, but each call adds a smaller frameTime, so update() still
+    // only fires roughly once per FIXED_STEP of real time either way.
+    while (accumulator >= FIXED_STEP) {
+      update();
+      accumulator -= FIXED_STEP;
+    }
   }
   render();
 
